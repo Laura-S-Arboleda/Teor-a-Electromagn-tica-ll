@@ -1,11 +1,14 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QDoubleSpinBox, QSpinBox, QPushButton, QTabWidget, QGroupBox,
     QFormLayout, QTextEdit, QMessageBox, QFileDialog, QFrame
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.colors import TwoSlopeNorm
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 from physics import gaussian_charge_density, total_charge, EPS0_NORMALIZED
@@ -36,83 +39,233 @@ class MplTab(QWidget):
         layout.addWidget(self.canvas)
 
 
-class Gaussian3DTab(QWidget):
-    """Pestaña interactiva para visualizar la densidad de carga gaussiana en 3D."""
+class Density3DTab(QWidget):
+    """Superficie 3D de la densidad de carga: la 'montaña' gaussiana."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.figure = Figure(figsize=(7, 5), dpi=100)
+        self.figure = Figure(figsize=(8, 6), dpi=120)
         self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setVisible(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.toolbar)
         layout.addWidget(self.canvas)
 
-    def plot(self, X, Y, rho, sigma):
-        """Dibuja rho(x,y) como una superficie 3D."""
-        self.figure.clear()
+    def plot(self, X, Y, Z, field_name="rho", field_label=None, title=None):
+        """
+        Grafica cualquier campo escalar 2D como superficie 3D.
 
+        field_name: "rho" para densidad de carga, "V" para potencial eléctrico.
+        field_label / title: si no se especifican, se infieren de field_name.
+        """
+        if field_label is None:
+            field_label = "ρ(x,y)" if field_name == "rho" else "V(x,y)"
+        if title is None:
+            title = (
+                "Densidad de carga 3D — montaña gaussiana"
+                if field_name == "rho"
+                else "Potencial eléctrico 3D — relieve de V(x,y)"
+            )
+
+        self.figure.clear()
         ax = self.figure.add_subplot(111, projection="3d")
 
-        # Para que la interfaz siga siendo fluida con mallas grandes,
-        # se reduce la cantidad de puntos usados únicamente para dibujar.
-        max_points = 101
-        step_x = max(1, X.shape[0] // max_points)
-        step_y = max(1, X.shape[1] // max_points)
-
-        Xp = X[::step_x, ::step_y]
-        Yp = Y[::step_x, ::step_y]
-        rhop = rho[::step_x, ::step_y]
-
-        surface = ax.plot_surface(
-            Xp,
-            Yp,
-            rhop,
+        # Superficie densa para que la montaña se vea suave incluso al hacer zoom.
+        surf = ax.plot_surface(
+            X, Y, Z,
             cmap="viridis",
-            edgecolor="none",
+            rcount=min(180, X.shape[0]),
+            ccount=min(180, X.shape[1]),
+            linewidth=0,
             antialiased=True,
-            rcount=min(max_points, rhop.shape[0]),
-            ccount=min(max_points, rhop.shape[1]),
+            shade=True,
         )
 
-        ax.set_title(
-            "Nube gaussiana 3D: ρ(x,y)",
-            fontsize=13,
-            pad=12,
+        # Proyección del plano z=0 para visualizar el soporte espacial.
+        z0 = np.zeros_like(Z)
+        ax.plot_surface(
+            X, Y, z0,
+            color="lightgray",
+            alpha=0.08,
+            linewidth=0,
+            antialiased=True,
         )
+
+        ax.set_title(title, fontsize=14, pad=14)
         ax.set_xlabel("x")
         ax.set_ylabel("y")
-        ax.set_zlabel("ρ(x,y)")
+        ax.set_zlabel(field_label)
+        ax.view_init(elev=28, azim=-55)
 
-        # Mantener una escala vertical razonable cuando rho0 es negativo.
-        zmin = float(np.min(rhop))
-        zmax = float(np.max(rhop))
-        if np.isclose(zmin, zmax):
-            margen = max(1.0, abs(zmax) * 0.1)
-        else:
-            margen = 0.08 * (zmax - zmin)
+        # Mantener proporciones razonables y permitir zoom/rotación con la barra.
+        ax.set_box_aspect((1, 1, 0.65))
 
-        ax.set_zlim(zmin - margen, zmax + margen)
-        ax.view_init(elev=30, azim=-55)
+        cbar = self.figure.colorbar(surf, ax=ax, shrink=0.72, pad=0.10)
+        cbar.set_label("Densidad de carga ρ" if field_name == "rho" else "Potencial eléctrico V")
 
-        cbar = self.figure.colorbar(
-            surface,
-            ax=ax,
-            shrink=0.72,
-            pad=0.10,
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+
+class Gaussian3DTab(QWidget):
+    """Geometría espacial de una nube gaussiana 3D."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.figure = Figure(figsize=(8, 6), dpi=120)
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.canvas)
+
+    def plot(self, rho0, sigma, x0, y0, L):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111, projection="3d")
+
+        extent = min(L, max(3.2 * sigma, 0.85 * L))
+        rho_max = max(abs(rho0), 1e-12)
+        signo_val = 1.0 if rho0 >= 0 else -1.0
+
+        # Como la nube es gaussiana isotrópica, rho(r) = rho0 * exp(-r^2/(2*sigma^2)),
+        # las superficies de densidad constante son ESFERAS EXACTAS.
+        # El radio de cada nivel se obtiene analíticamente (sin marching cubes,
+        # sin muestreo de puntos, y por tanto sin artefactos de aliasing/moiré):
+        #     frac = exp(-r^2/(2*sigma^2))  =>  r = sigma * sqrt(-2*ln(frac))
+        levels = (0.70, 0.45, 0.25, 0.10)
+        # Más transparentes en general para poder ver el centro a través de ellas.
+        alphas = (0.32, 0.22, 0.15, 0.09)
+
+        # Malla angular para cada esfera (independiente de la malla espacial del dominio).
+        n_theta, n_phi = 60, 30
+        theta = np.linspace(0, 2 * np.pi, n_theta)
+        phi = np.linspace(0, np.pi, n_phi)
+        theta, phi = np.meshgrid(theta, phi)
+
+        cmap = plt.get_cmap("coolwarm")
+        frac_min, frac_max = min(levels), max(levels)
+
+        # Calculamos radio de cada nivel y ordenamos de mayor a menor radio,
+        # para dibujar primero las capas exteriores (más grandes, más
+        # transparentes) y al final las interiores (más pequeñas, más densas),
+        # de modo que el centro quede visible por encima de todas.
+        level_data = []
+        for frac, alpha in zip(levels, alphas):
+            if frac >= 1.0:
+                continue
+            r_level = sigma * np.sqrt(-2.0 * np.log(frac))
+            if r_level > extent:
+                continue  # nivel fuera del recorte visible, se omite
+            level_data.append((frac, alpha, r_level))
+        level_data.sort(key=lambda item: item[2], reverse=True)  # radio: mayor -> menor
+
+        for frac, alpha, r_level in level_data:
+            Xs = x0 + r_level * np.sin(phi) * np.cos(theta)
+            Ys = y0 + r_level * np.sin(phi) * np.sin(theta)
+            Zs = r_level * np.cos(phi)
+
+            # Color estirado sobre un rango amplio del colormap (evita que
+            # todos los niveles caigan en tonos muy parecidos): niveles bajos
+            # de densidad (frac cerca de frac_min) quedan en tonos claros y
+            # niveles altos (frac cerca de frac_max) en tonos intensos.
+            t = (frac - frac_min) / (frac_max - frac_min)  # 0 (nivel externo) a 1 (interno)
+            color_val = 0.5 + signo_val * (0.08 + 0.42 * t)
+            color = cmap(color_val)
+
+            ax.plot_surface(
+                Xs, Ys, Zs,
+                color=color,
+                alpha=alpha,
+                linewidth=0,
+                antialiased=True,
+                shade=True,
+            )
+
+        # Puntos de carga dentro de la nube ("puntitos"): se muestrean
+        # con densidad de probabilidad radial proporcional a rho(r), de modo
+        # que se concentran naturalmente cerca del centro sin necesidad de
+        # filtrar una malla (evita el artefacto de moiré visto anteriormente).
+        n_points = 900
+        rng = np.random.default_rng(7)
+
+        # Para una gaussiana 3D, el radio se puede muestrear invirtiendo su CDF
+        # radial: r = sigma * sqrt(-2 ln(1 - u)) truncado al recorte visible.
+        u = rng.uniform(0.0, 1.0 - 0.10, size=n_points)  # excluye la cola > extent aprox.
+        r_samples = sigma * np.sqrt(-2.0 * np.log(1.0 - u))
+        r_samples = r_samples[r_samples <= extent]
+
+        n_valid = len(r_samples)
+        costheta = rng.uniform(-1.0, 1.0, size=n_valid)
+        phi_s = np.arccos(costheta)
+        theta_s = rng.uniform(0.0, 2 * np.pi, size=n_valid)
+
+        Xp = x0 + r_samples * np.sin(phi_s) * np.cos(theta_s)
+        Yp = y0 + r_samples * np.sin(phi_s) * np.sin(theta_s)
+        Zp = r_samples * np.cos(phi_s)
+
+        rho_at_points = rho0 * np.exp(-r_samples**2 / (2.0 * sigma**2))
+
+        ax.scatter(
+            Xp, Yp, Zp,
+            c=rho_at_points,
+            cmap="coolwarm",
+            vmin=-rho_max, vmax=rho_max,
+            s=6,
+            alpha=0.55,
+            linewidths=0,
+            depthshade=True,
         )
-        cbar.set_label("Densidad de carga ρ")
 
+        # Centro de la nube.
+        ax.scatter(
+            [x0], [y0], [0],
+            s=70,
+            c="black",
+            edgecolors="white",
+            linewidths=1.0,
+            depthshade=True,
+        )
+        ax.text(x0, y0, 0, "  centro", fontsize=9)
+
+        ax.set_title("Geometría 3D de una nube de carga gaussiana", fontsize=14, pad=14)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
+        ax.set_xlim(x0 - extent, x0 + extent)
+        ax.set_ylim(y0 - extent, y0 + extent)
+        ax.set_zlim(-extent, extent)
+        ax.set_box_aspect((1, 1, 1))
+        ax.view_init(elev=24, azim=-55)
+
+        signo = "+" if rho0 >= 0 else "−"
+        info_text = (
+            f"$\\rho_0$ = {rho0:.3f}\n"
+            f"$\\sigma$ = {sigma:.3f}\n"
+            f"signo = {signo}"
+        )
         ax.text2D(
-            0.02,
-            0.02,
-            f"σ = {sigma:.3f}",
+            0.02, 0.98,
+            info_text,
             transform=ax.transAxes,
             fontsize=10,
+            va="top",
+            ha="left",
+            bbox=dict(
+                boxstyle="round,pad=0.4",
+                facecolor="white",
+                edgecolor="gray",
+                alpha=0.85,
+            ),
         )
 
         self.figure.tight_layout()
         self.canvas.draw()
+
 
 
 class TheoryTab(QWidget):
@@ -313,6 +466,7 @@ class MainWindow(QMainWindow):
         self.tab_potential = MplTab()
         self.tab_field = MplTab()
         self.tab_gauss = MplTab()
+        self.tab_density_3d = Density3DTab()
         self.tab_gaussian_3d = Gaussian3DTab()
         self.tab_theory = TheoryTab()
 
@@ -320,7 +474,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_potential, "B. Potencial eléctrico")
         self.tabs.addTab(self.tab_field, "C. Campo y equipotenciales")
         self.tabs.addTab(self.tab_gauss, "D. Verificación Ley de Gauss")
-        self.tabs.addTab(self.tab_gaussian_3d, "E. Nube gaussiana 3D")
+        self.tabs.addTab(self.tab_density_3d, "E. Densidad 3D — montaña")
+        self.tabs.addTab(self.tab_gaussian_3d, "F. Nube gaussiana 3D")
         self.tabs.addTab(self.tab_theory, "Fundamento teórico")
 
         return self.tabs
@@ -395,6 +550,9 @@ class MainWindow(QMainWindow):
             viz.plot_charge_density(self.tab_charge.figure, X, Y, rho)
             self.tab_charge.canvas.draw()
 
+            # Montaña 3D de la densidad de carga.
+            self.tab_density_3d.plot(X, Y, rho, field_name="rho")
+
             viz.plot_potential(self.tab_potential.figure, X, Y, V)
             self.tab_potential.canvas.draw()
 
@@ -406,7 +564,13 @@ class MainWindow(QMainWindow):
             )
             self.tab_gauss.canvas.draw()
 
-            self.tab_gaussian_3d.plot(X, Y, rho, sigma)
+            self.tab_gaussian_3d.plot(
+                rho0=rho0,
+                sigma=sigma,
+                x0=x0,
+                y0=y0,
+                L=L,
+            )
 
             self._update_results_panel(rho, V, Ex, Ey, gauss, dx, dy)
 
