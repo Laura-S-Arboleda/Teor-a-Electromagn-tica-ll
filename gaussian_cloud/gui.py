@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 from physics import gaussian_charge_density, total_charge, EPS0_NORMALIZED
 from solver import solve_poisson, compute_electric_field, compute_divergence, gauss_law_error
@@ -33,6 +34,85 @@ class MplTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
+
+
+class Gaussian3DTab(QWidget):
+    """Pestaña interactiva para visualizar la densidad de carga gaussiana en 3D."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.figure = Figure(figsize=(7, 5), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.canvas)
+
+    def plot(self, X, Y, rho, sigma):
+        """Dibuja rho(x,y) como una superficie 3D."""
+        self.figure.clear()
+
+        ax = self.figure.add_subplot(111, projection="3d")
+
+        # Para que la interfaz siga siendo fluida con mallas grandes,
+        # se reduce la cantidad de puntos usados únicamente para dibujar.
+        max_points = 101
+        step_x = max(1, X.shape[0] // max_points)
+        step_y = max(1, X.shape[1] // max_points)
+
+        Xp = X[::step_x, ::step_y]
+        Yp = Y[::step_x, ::step_y]
+        rhop = rho[::step_x, ::step_y]
+
+        surface = ax.plot_surface(
+            Xp,
+            Yp,
+            rhop,
+            cmap="viridis",
+            edgecolor="none",
+            antialiased=True,
+            rcount=min(max_points, rhop.shape[0]),
+            ccount=min(max_points, rhop.shape[1]),
+        )
+
+        ax.set_title(
+            "Nube gaussiana 3D: ρ(x,y)",
+            fontsize=13,
+            pad=12,
+        )
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("ρ(x,y)")
+
+        # Mantener una escala vertical razonable cuando rho0 es negativo.
+        zmin = float(np.min(rhop))
+        zmax = float(np.max(rhop))
+        if np.isclose(zmin, zmax):
+            margen = max(1.0, abs(zmax) * 0.1)
+        else:
+            margen = 0.08 * (zmax - zmin)
+
+        ax.set_zlim(zmin - margen, zmax + margen)
+        ax.view_init(elev=30, azim=-55)
+
+        cbar = self.figure.colorbar(
+            surface,
+            ax=ax,
+            shrink=0.72,
+            pad=0.10,
+        )
+        cbar.set_label("Densidad de carga ρ")
+
+        ax.text2D(
+            0.02,
+            0.02,
+            f"σ = {sigma:.3f}",
+            transform=ax.transAxes,
+            fontsize=10,
+        )
+
+        self.figure.tight_layout()
+        self.canvas.draw()
 
 
 class TheoryTab(QWidget):
@@ -98,7 +178,7 @@ class MainWindow(QMainWindow):
             "Ley de Gauss para la Electricidad — Simulación de nube de carga gaussiana"
         )
         self.resize(1300, 820)
-
+   
         self._last_state = None  # almacena el último resultado calculado
 
         self._build_ui()
@@ -233,12 +313,14 @@ class MainWindow(QMainWindow):
         self.tab_potential = MplTab()
         self.tab_field = MplTab()
         self.tab_gauss = MplTab()
+        self.tab_gaussian_3d = Gaussian3DTab()
         self.tab_theory = TheoryTab()
 
         self.tabs.addTab(self.tab_charge, "A. Densidad de carga")
         self.tabs.addTab(self.tab_potential, "B. Potencial eléctrico")
         self.tabs.addTab(self.tab_field, "C. Campo y equipotenciales")
         self.tabs.addTab(self.tab_gauss, "D. Verificación Ley de Gauss")
+        self.tabs.addTab(self.tab_gaussian_3d, "E. Nube gaussiana 3D")
         self.tabs.addTab(self.tab_theory, "Fundamento teórico")
 
         return self.tabs
@@ -323,6 +405,8 @@ class MainWindow(QMainWindow):
                 self.tab_gauss.figure, X, Y, divE, gauss["target"], gauss["error_map"]
             )
             self.tab_gauss.canvas.draw()
+
+            self.tab_gaussian_3d.plot(X, Y, rho, sigma)
 
             self._update_results_panel(rho, V, Ex, Ey, gauss, dx, dy)
 
