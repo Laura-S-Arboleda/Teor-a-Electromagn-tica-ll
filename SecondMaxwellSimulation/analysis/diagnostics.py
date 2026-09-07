@@ -5,9 +5,23 @@ import numpy as np
 
 def error_statistics(values: np.ndarray) -> dict:
     """
-    Devuelve estadísticas básicas de un campo de error.
+    Devuelve estadísticas básicas de un campo de error,
+    ignorando valores NaN e infinitos.
     """
     values = np.asarray(values, dtype=float)
+
+    # Conservar únicamente valores finitos
+    values = values[np.isfinite(values)]
+
+    if values.size == 0:
+        return {
+            "max_abs": np.nan,
+            "mean_abs": np.nan,
+            "rms": np.nan,
+            "median_abs": np.nan,
+            "std": np.nan,
+        }
+
     abs_values = np.abs(values)
 
     return {
@@ -21,13 +35,25 @@ def error_statistics(values: np.ndarray) -> dict:
 
 def locate_largest_errors(values: np.ndarray, threshold_fraction: float = 0.9):
     """
-    Devuelve índices donde el valor absoluto supera una fracción del máximo.
+    Devuelve índices donde el valor absoluto supera una fracción del máximo,
+    ignorando valores NaN e infinitos.
     """
     values = np.asarray(values, dtype=float)
     abs_values = np.abs(values)
-    max_val = np.max(abs_values)
+
+    # Evitar que NaN/inf afecten la búsqueda
+    finite_mask = np.isfinite(values)
+
+    if not np.any(finite_mask):
+        return np.empty((0, values.ndim), dtype=int)
+
+    max_val = np.max(abs_values[finite_mask])
 
     if max_val == 0:
         return np.empty((0, values.ndim), dtype=int)
 
-    return np.argwhere(abs_values >= threshold_fraction * max_val)
+    mask = finite_mask & (
+        abs_values >= threshold_fraction * max_val
+    )
+
+    return np.argwhere(mask)
