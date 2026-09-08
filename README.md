@@ -1,4 +1,4 @@
-````markdown
+
 <div align="center">
 
 # ⚡ Simulaciones Computacionales de las Ecuaciones de Maxwell
