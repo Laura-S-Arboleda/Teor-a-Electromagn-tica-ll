@@ -439,4 +439,3 @@ Proyecto académico de simulación, visualización y análisis computacional
 de las **Ecuaciones de Maxwell**.
 
 </div>
-```
