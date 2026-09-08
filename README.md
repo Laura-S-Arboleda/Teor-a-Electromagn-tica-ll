@@ -7,9 +7,9 @@
 
 <br>
 
-<img src="https://raw.githubusercontent.com/Laura-S-Arboleda/Teor-a-Electromagn-tica-ll/facu.png" width="120">
+<img src="https://raw.githubusercontent.com/Laura-S-Arboleda/Teor-a-Electromagn-tica-ll/main/facu.png" width="120">
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-<img src="https://raw.githubusercontent.com/Laura-S-Arboleda/Teor-a-Electromagn-tica-ll/fisica_logo_3.png" width="120">
+<img src="https://raw.githubusercontent.com/Laura-S-Arboleda/Teor-a-Electromagn-tica-ll/main/fisica_logo_3.png" width="120">
 
 <br><br>
 
